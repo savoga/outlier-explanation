@@ -15,11 +15,17 @@ import DataGeneration as dg
 
 EPS=1.e-6
 
+# we check whether SMOTE is needed. If outlier proportion is already > 5%, then sampling is not needed.
+def isSamplingNeeded(labels):
+    nb_outliers = labels[labels[labels.columns[0]]=='Outlier'].shape[0]
+    nb_inliers = labels[labels[labels.columns[0]]=='Inlier'].shape[0]
+    outlier_proportion = nb_outliers/nb_inliers
+    return False if outlier_proportion > 0.05 else True
+
 # perform SMOTE to start from a more balanced dataset
 def performSMOTE(data, labels):
     oversample = SMOTE(sampling_strategy=0.05) # we want at least 5% of minority class
     data_aug, label_aug = oversample.fit_resample(data, labels)
-    label_aug.columns = ['Outlier_Inlier']
     nb_generated_outliers = data_aug.shape[0] - data.shape[0]
     print("number of generated outliers: {}".format(nb_generated_outliers))
     return data_aug, label_aug
@@ -122,13 +128,19 @@ def showCoef(X, clf):
     plot(fig)
 
 def explain(outlier_idx, data, labels):
-    data_aug, label_aug = performSMOTE(data, labels)
+    if(isSamplingNeeded(labels)):                                                 # SMOTE is needed only if outlier proportion is < 5%
+        data_aug, label_aug = performSMOTE(data, labels)                          # perform SMOTE to start from a more balanced dataset
+    else:
+        print('No sampling needed')
+        data_aug = data
+        label_aug = labels
+    label_aug.columns = ['Outlier_Inlier']
     outlier = data[data.index==outlier_idx]
-    X, Y, indices, distances = selectNeighborhood(data_aug, label_aug, outlier)
-    bandwidth = computeBandwidth(label_aug, indices, distances)
-    lambda_opt = findBestRegularization(X, Y, outlier, bandwidth)
-    clf = computeRegression(X, Y, lambda_opt, bandwidth, outlier)
-    showCoef(X, clf)
+    X, Y, indices, distances = selectNeighborhood(data_aug, label_aug, outlier)   # select neighborhood according to class proportions
+    bandwidth = computeBandwidth(label_aug, indices, distances)                   # compute bandwidth as 0.05*SQRT(distance to the closest inlier)
+    lambda_opt = findBestRegularization(X, Y, outlier, bandwidth)                 # perform StratifiedKFold validation to select the best regularization strength
+    clf = computeRegression(X, Y, lambda_opt, bandwidth, outlier)                 # compute logistic regression using above parameters
+    showCoef(X, clf)                                                              # display coefficients to see most important features
 
 X_fake, Y_fake, idx_outliers = dg.fakeDataset5Dimensions()
 X_fake[X_fake.index==idx_outliers[0]] # we will test on the first outlier
